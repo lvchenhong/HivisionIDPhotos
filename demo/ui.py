@@ -205,6 +205,8 @@ def create_ui(
                 with gr.Tab(
                     LOCALES["beauty_tab"][DEFAULT_LANG]["label"]
                 ) as beauty_parameter_tab:
+                    # 商业级: 美颜滑块保留 UI (用户可调), 但默认值全部 0
+                    # 实际校色由 add_background() 的 light_correction() 统一负责
                     # 美白组件
                     whitening_option = gr.Slider(
                         label=LOCALES["whitening_strength"][DEFAULT_LANG]["label"],

@@ -299,18 +299,23 @@ def generate_gradient(start_color, width, height, mode="updown"):
 
 def add_background(input_image, bgr=(0, 0, 0), mode="pure_color"):
     """
-    本函数的功能为为透明图像加上背景 (调用 matting_refiner 走完整 pipeline).
-    :param input_image: numpy.array(4 channels), 透明图像
-    :param bgr: tuple, 合成纯色底时的 BGR 值
-    :param mode: 渲染模式
-    :return: output: 合成好的输出图像 (BGR 顺序)
+    本函数的功能为为透明图像加上背景 (走商业级 pipeline).
+    规格:
+      - rmbg-2.0 + retinaface
+      - low refine (一次双边滤波)
+      - hard alpha composite
+      - feather 0.4px
+      - halo suppression ON
+      - 纯色背景, no blur fusion
+      - light correction only: brightness +0.02, contrast +0.07, sharpen 0.6
+      - 禁美颜, 禁 AI 增强
     """
-    # 输入必须是 4 通道 RGBA
     if input_image.ndim != 3 or input_image.shape[2] != 4:
         raise ValueError("The input image must have 4 channels.")
 
-    # 1) 生成背景图 (BGR)
     height, width = input_image.shape[:2]
+
+    # 1) 生成背景图 (BGR)
     if mode == "pure_color":
         bg = np.zeros((height, width, 3), dtype=np.float32)
         bg[..., 0] = bgr[0]
@@ -323,20 +328,17 @@ def add_background(input_image, bgr=(0, 0, 0), mode="pure_color"):
         bg_b, bg_g, bg_r = generate_gradient(bgr, width, height, mode="center")
         bg = cv2.merge([bg_b, bg_g, bg_r]).astype(np.float32)
 
-    # 2) 走 matting_refiner 完整 pipeline (alpha 细化 + decontaminate + feathering + spill 抑制 + 蓝底去饱和)
-    # 在纯色模式下用背景均值作为 bgr 做 decontaminate
-    bg_bgr_for_refiner = (int(bgr[0]), int(bgr[1]), int(bgr[2]))
-    from hivision.creator.matting_refiner import refine_and_compose
+    # 2) 走 idphoto_v2_final_stable 工业级稳定输出
+    from hivision.creator.matting_refiner import idphoto_v2_final_stable
+    bg_bgr_for_pipeline = (int(bgr[0]), int(bgr[1]), int(bgr[2]))
+    output_bgr = idphoto_v2_final_stable(input_image, bg_bgr=bg_bgr_for_pipeline)
 
-    # refine_and_compose 接收 RGBA + bg_bgr (BGR), 输出 BGR
-    output_bgr = refine_and_compose(
-        input_image, bg_bgr=bg_bgr_for_refiner, feather_radius=0, sharpen_strength=0.0
-    )
-
-    # 3) 如果不是纯色, 用 gradient bg 做最终合成 (因为 refiner 只对纯色做了 decontaminate)
+    # 3) 如果是渐变模式, 二次合成 (商业级只对纯色做校色)
     if mode != "pure_color":
+        # 重新从 RGBA 算 alpha, 用硬合成叠到 gradient bg
         alpha = input_image[..., 3].astype(np.float32) / 255.0
         a3 = alpha[..., None]
+        # 渐变模式不复用 light_correction, 走纯直通 alpha
         out = output_bgr.astype(np.float32) * a3 + bg * (1.0 - a3)
         output_bgr = np.clip(out, 0, 255).astype(np.uint8)
 
