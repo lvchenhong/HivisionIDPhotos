@@ -7,6 +7,24 @@ r"""
 @Description:
     人像抠图 - V2.5 Production Stable Mode (GPU稳定版)
 """
+import os
+# 让 onnxruntime-gpu 找得到 cuDNN/CUDA native DLL（在 onnxruntime import 前必须执行）
+# 系统 CUDA DLL 优先（版本匹配 onnxruntime-gpu 1.22.0）
+# venv 路径修正：__file__ 在 hivision/creator/ 下，需要上溯 3 层到项目根目录
+_VENV_BASE = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+_NVIDIA_DLL_DIRS = [
+    r"C:\Program Files\NVIDIA GPU Computing Toolkit\CUDA\v12.6\bin",  # 系统 CUDA 12.6（兼容 onnxruntime-gpu 1.22.0）
+    os.path.join(_VENV_BASE, "venv", "Lib", "site-packages", "nvidia", "cudnn", "bin"),
+]
+for _d in _NVIDIA_DLL_DIRS:
+    if os.path.isdir(_d):
+        try:
+            os.add_dll_directory(_d)
+        except Exception:
+            pass
+        # 一些 Windows 版本也要靠 PATH（pip 装的 onnxruntime 加载 native DLL 用 win32 LoadLibraryEx，会查 PATH）
+        os.environ["PATH"] = _d + os.pathsep + os.environ.get("PATH", "")
+
 import numpy as np
 from PIL import Image
 import onnxruntime
@@ -38,7 +56,11 @@ WEIGHTS = {
     ),
 }
 
-ONNX_DEVICE = onnxruntime.get_device()
+ONNX_DEVICE = (
+    "CUDAExecutionProvider"
+    if "CUDAExecutionProvider" in onnxruntime.get_available_providers()
+    else "CPUExecutionProvider"
+)
 
 HIVISION_MODNET_SESS = None
 MODNET_PHOTOGRAPHIC_PORTRAIT_MATTING_SESS = None

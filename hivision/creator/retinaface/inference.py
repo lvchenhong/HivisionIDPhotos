@@ -1,3 +1,19 @@
+import os
+# 让 onnxruntime-gpu 找得到 cuDNN/CUDA native DLL（在 onnxruntime import 前必须执行）
+_NVIDIA_DLL_DIRS = [
+    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "venv", "Lib", "site-packages", "nvidia", "cudnn", "bin"),
+    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "venv", "Lib", "site-packages", "nvidia", "cublas", "bin"),
+    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "venv", "Lib", "site-packages", "nvidia", "cuda_nvrtc", "bin"),
+    os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), "venv", "Lib", "site-packages", "nvidia", "cuda_runtime", "bin"),
+]
+for _d in _NVIDIA_DLL_DIRS:
+    if os.path.isdir(_d):
+        try:
+            os.add_dll_directory(_d)
+        except Exception:
+            pass
+        os.environ["PATH"] = _d + os.pathsep + os.environ.get("PATH", "")
+
 import numpy as np
 import cv2
 import onnxruntime
@@ -48,7 +64,7 @@ vis_thres = 0.6
 
 ONNX_DEVICE = (
     "CUDAExecutionProvider"
-    if onnxruntime.get_device() == "GPU"
+    if "CUDAExecutionProvider" in onnxruntime.get_available_providers()
     else "CPUExecutionProvider"
 )
 
