@@ -151,31 +151,57 @@ def extract_human_birefnet_lite(ctx: Context):
 
 
 def hollow_out_fix(src: np.ndarray) -> np.ndarray:
+    """
+    填内部空洞 + 加一圈透明边距
+
+    V3 修复: Trae 旧版用 `cv2.add(a, 255 - a_contour)` 把主体外的 a 强制拉到 255,
+             直接把发丝/肩膀的软边 (5 < a < 127) 烧死成硬 255, 边缘变成硬切 + halo.
+    正确逻辑: 只把"主体内"的洞填成 255, 主体外的 a (含软边) 保留原值不动.
+
+    原理:
+      1. 用 a >= 127 的 mask 找"明确前景"区域, 描出最大连通块作为主体
+      2. 用 floodFill 从 (0,0) 开始填, 把 a_anchor 主体外区域标记出来
+      3. 取反: 主体内 = 255, 主体外 = 0
+      4. 用 max(a, hole_mask) 而不是 add → 主体内洞填 255, 主体外保留原 a
+    """
     b, g, r, a = cv2.split(src)
     src_bgr = cv2.merge((b, g, r))
-    add_area = np.zeros((10, a.shape[1]), np.uint8)
-    a = np.vstack((add_area, a, add_area))
-    add_area = np.zeros((a.shape[0], 10), np.uint8)
-    a = np.hstack((add_area, a, add_area))
-    _, a_threshold = cv2.threshold(a, 127, 255, 0)
-    a_erode = cv2.erode(
-        a_threshold,
-        kernel=cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3)),
-        iterations=1,
+
+    # 加 10px 透明边距 (避免边缘 alpha 出图)
+    pad_top = np.zeros((10, a.shape[1]), np.uint8)
+    a_padded = np.vstack((pad_top, a, pad_top))
+    pad_left = np.zeros((a_padded.shape[0], 10), np.uint8)
+    a_padded = np.hstack((pad_left, a_padded, pad_left))
+
+    h, w = a_padded.shape[:2]
+
+    # 1) 找"明确前景"主体 (a >= 127)
+    _, a_anchor = cv2.threshold(a_padded, 127, 255, cv2.THRESH_BINARY)
+    contours, _ = cv2.findContours(
+        a_anchor, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
     )
-    contours, hierarchy = cv2.findContours(
-        a_erode, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE
-    )
-    contours = [x for x in contours]
-    contours.sort(key=lambda c: cv2.contourArea(c), reverse=True)
-    a_contour = cv2.drawContours(np.zeros(a.shape, np.uint8), contours[0], -1, 255, 2)
-    h, w = a.shape[:2]
-    mask = np.zeros(
-        [h + 2, w + 2], np.uint8
-    )
-    cv2.floodFill(a_contour, mask=mask, seedPoint=(0, 0), newVal=255)
-    a = cv2.add(a, 255 - a_contour)
-    return cv2.merge((src_bgr, a[10:-10, 10:-10]))
+    if not contours:
+        return src
+    contours = sorted(contours, key=cv2.contourArea, reverse=True)
+
+    # 2) 画主体填充
+    a_subject = np.zeros(a_padded.shape, np.uint8)
+    cv2.drawContours(a_subject, [contours[0]], -1, 255, thickness=cv2.FILLED)
+
+    # 3) floodFill from (0,0): 把"主体外"在 a_subject 上填成 128
+    flood_mask = np.zeros([h + 2, w + 2], np.uint8)
+    cv2.floodFill(a_subject, mask=flood_mask, seedPoint=(0, 0), newVal=128)
+    # 现在 a_subject: 主体内=255, 主体外=128
+
+    # 4) hole_mask: 主体内 = 255, 主体外 = 0
+    hole_mask = (a_subject == 255).astype(np.uint8) * 255
+
+    # 5) 关键: 用 np.maximum 而不是 cv2.add!
+    #    主体内: max(原 a, 255) = 255 (填洞)
+    #    主体外: max(原 a, 0) = 原 a (保留软边!)
+    a_filled = np.maximum(a_padded, hole_mask)
+
+    return cv2.merge((src_bgr, a_filled[10:-10, 10:-10]))
 
 
 def image2bgr(input_image):
@@ -201,7 +227,7 @@ def read_modnet_image(input_image, ref_size=512):
     return im, width, length
 
 
-def get_modnet_matting(input_image, checkpoint_path, ref_size=512):
+def get_modnet_matting(input_image, checkpoint_path, ref_size=768):
     global HIVISION_MODNET_SESS
     if not os.path.exists(checkpoint_path):
         print(f"Checkpoint file not found: {checkpoint_path}")
@@ -214,7 +240,7 @@ def get_modnet_matting(input_image, checkpoint_path, ref_size=512):
     matte = HIVISION_MODNET_SESS.run([output_name], {input_name: im})
     matte = (matte[0] * 255).astype("uint8")
     matte = np.squeeze(matte)
-    mask = cv2.resize(matte, (width, length), interpolation=cv2.INTER_AREA)
+    mask = cv2.resize(matte, (width, length), interpolation=cv2.INTER_NEAREST)
     b, g, r = cv2.split(np.uint8(input_image))
     output_image = cv2.merge((b, g, r, mask))
     if os.getenv("RUN_MODE") != "beast":
@@ -241,12 +267,27 @@ def get_modnet_matting_photographic_portrait_matting(
     )
     matte = (matte[0] * 255).astype("uint8")
     matte = np.squeeze(matte)
-    mask = cv2.resize(matte, (width, length), interpolation=cv2.INTER_AREA)
+    mask = cv2.resize(matte, (width, length), interpolation=cv2.INTER_NEAREST)
     b, g, r = cv2.split(np.uint8(input_image))
     output_image = cv2.merge((b, g, r, mask))
     if os.getenv("RUN_MODE") != "beast":
         MODNET_PHOTOGRAPHIC_PORTRAIT_MATTING_SESS = None
     return output_image
+
+
+def _soften_alpha_scurve(alpha_f: np.ndarray, lo: float = 0.05, hi: float = 0.95) -> np.ndarray:
+    """
+    对 rmbg 输出的硬 mask 做软化
+
+    V3.4.1 回退: 经用户反馈, V3.4 的 mask Gaussian blur 让边缘外 1-3 像素
+    的 α 降到 ~0.5, 但 V3.2 matting_refine 不当它是背景, 当软边处理
+    (用 RGB blend 蓝底), 反而引入"灰雾". 数据上看 v3.4 比 v3.3.3
+    "接近蓝底像素 102 -> 0" 更好, 但用户视觉觉得更差.
+
+    V3.4.1 决定: 回退到 no-op, 不动 alpha. 边缘硬切问题留给换模型
+    (birefnet) 或加专门的 edge-aware composite, 不在 mask 上做.
+    """
+    return alpha_f
 
 
 def get_rmbg_matting(input_image: np.ndarray, checkpoint_path, ref_size=1024):
@@ -277,6 +318,8 @@ def get_rmbg_matting(input_image: np.ndarray, checkpoint_path, ref_size=1024):
     ma = np.max(result)
     mi = np.min(result)
     result = (result - mi) / (ma - mi)
+    # V3: 对 rmbg 硬 mask 做 S 曲线软化, 增加软边 (1% -> 8-12%)
+    result = _soften_alpha_scurve(result, lo=0.05, hi=0.95)
     im_array = (result * 255).astype(np.uint8)
     pil_mask = Image.fromarray(im_array, mode="L")
     pil_mask = pil_mask.resize(orig_image.size, Image.BILINEAR)
@@ -292,10 +335,9 @@ def get_rmbg_matting(input_image: np.ndarray, checkpoint_path, ref_size=1024):
 
 def get_rmbg_matting_2(input_image: np.ndarray, checkpoint_path, ref_size=1024):
     """
-    rmbg-2.0 V2.5稳定版推理
+    rmbg-2.0 V3稳定版推理
     - 固定输入尺寸 1024x1024
-    - FP16推理
-    - 无动态缩放
+    - S 曲线软化 mask (软边从 ~1% 提升到 ~10%)
     """
     global RMBG_2_SESS
 
@@ -325,6 +367,8 @@ def get_rmbg_matting_2(input_image: np.ndarray, checkpoint_path, ref_size=1024):
     ma = np.max(result)
     mi = np.min(result)
     result = (result - mi) / (ma - mi)
+    # V3: S 曲线软化
+    result = _soften_alpha_scurve(result, lo=0.05, hi=0.95)
     im_array = (result * 255).astype(np.uint8)
     pil_mask = Image.fromarray(im_array, mode="L")
     pil_mask = pil_mask.resize(orig_image.size, Image.BILINEAR)
@@ -351,7 +395,7 @@ def get_mnn_modnet_matting(input_image, checkpoint_path, ref_size=512):
     config["precision"] = "low"
     config["backend"] = 0
     config["numThread"] = 4
-    im, width, length = read_modnet_image(input_image, ref_size=512)
+    im, width, length = read_modnet_image(input_image, ref_size=768)
     rt = nn.create_runtime_manager((config,))
     net = nn.load_module_from_file(
         checkpoint_path, ["input1"], ["output1"], runtime_manager=rt
@@ -362,7 +406,7 @@ def get_mnn_modnet_matting(input_image, checkpoint_path, ref_size=512):
     matte = matte.read()
     matte = (matte * 255).astype("uint8")
     matte = np.squeeze(matte)
-    mask = cv2.resize(matte, (width, length), interpolation=cv2.INTER_AREA)
+    mask = cv2.resize(matte, (width, length), interpolation=cv2.INTER_NEAREST)
     b, g, r = cv2.split(np.uint8(input_image))
     output_image = cv2.merge((b, g, r, mask))
     return output_image
@@ -403,7 +447,7 @@ def get_birefnet_portrait_matting(input_image, checkpoint_path, ref_size=512):
     pil_im = Image.fromarray(
         im_array, mode="L"
     )
-    pil_im = pil_im.resize(orig_image.size, Image.BILINEAR)
+    pil_im = pil_im.resize(orig_image.size, Image.NEAREST)
     new_im = Image.new("RGBA", orig_image.size, (0, 0, 0, 0))
     new_im.paste(orig_image, mask=pil_im)
     

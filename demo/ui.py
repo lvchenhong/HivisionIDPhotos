@@ -158,7 +158,7 @@ def create_ui(
                     head_measure_ratio_option = gr.Slider(
                         minimum=0.1,
                         maximum=0.5,
-                        value=0.2,
+                        value=0.26,
                         step=0.01,
                         label=LOCALES["head_measure_ratio"][DEFAULT_LANG]["label"],
                         interactive=True,
@@ -166,7 +166,7 @@ def create_ui(
                     top_distance_option = gr.Slider(
                         minimum=0.02,
                         maximum=0.5,
-                        value=0.12,
+                        value=0.10,
                         step=0.01,
                         label=LOCALES["top_distance"][DEFAULT_LANG]["label"],
                         interactive=True,
@@ -223,7 +223,7 @@ def create_ui(
                             label=LOCALES["brightness_strength"][DEFAULT_LANG]["label"],
                             minimum=-5,
                             maximum=25,
-                            value=0,
+                            value=2,
                             step=1,
                             interactive=True,
                         )

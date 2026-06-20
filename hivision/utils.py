@@ -328,17 +328,30 @@ def add_background(input_image, bgr=(0, 0, 0), mode="pure_color"):
         bg_b, bg_g, bg_r = generate_gradient(bgr, width, height, mode="center")
         bg = cv2.merge([bg_b, bg_g, bg_r]).astype(np.float32)
 
-    # 2) 走 idphoto_v2_final_stable 工业级稳定输出
+    # 2) 关键修复: 在送 refiner 之前, 先把 α=0 区域的 RGB 强制设为背景色
+    # (Trae 旧 IDphotos_cut 阶段用 RGB=255 白底补位, 不处理会导致软边发白)
+    rgba_clean = input_image.copy()
+    alpha0_mask = rgba_clean[..., 3] == 0
+    if alpha0_mask.any():
+        rgba_clean[alpha0_mask, 0] = bgr[0]
+        rgba_clean[alpha0_mask, 1] = bgr[1]
+        rgba_clean[alpha0_mask, 2] = bgr[2]
+
+    # 3) 走 idphoto_v2_final_stable 工业级稳定输出
     from hivision.creator.matting_refiner import idphoto_v2_final_stable
     bg_bgr_for_pipeline = (int(bgr[0]), int(bgr[1]), int(bgr[2]))
-    output_bgr = idphoto_v2_final_stable(input_image, bg_bgr=bg_bgr_for_pipeline)
+    output_bgr = idphoto_v2_final_stable(rgba_clean, bg_bgr=bg_bgr_for_pipeline)
 
-    # 3) 如果是渐变模式, 二次合成 (商业级只对纯色做校色)
-    if mode != "pure_color":
-        # 重新从 RGBA 算 alpha, 用硬合成叠到 gradient bg
-        alpha = input_image[..., 3].astype(np.float32) / 255.0
+    # 4) 兜底: 合成后再硬覆盖 α=0 区域 (因为 refiner 内部可能因浮点误差回归)
+    alpha = rgba_clean[..., 3].astype(np.float32) / 255.0
+    if alpha0_mask.any():
         a3 = alpha[..., None]
-        # 渐变模式不复用 light_correction, 走纯直通 alpha
+        out = output_bgr.astype(np.float32) * a3 + bg * (1.0 - a3)
+        output_bgr = np.clip(out, 0, 255).astype(np.uint8)
+
+    # 5) 如果是渐变模式, 二次合成 (商业级只对纯色做校色)
+    if mode != "pure_color":
+        a3 = alpha[..., None]
         out = output_bgr.astype(np.float32) * a3 + bg * (1.0 - a3)
         output_bgr = np.clip(out, 0, 255).astype(np.uint8)
 
