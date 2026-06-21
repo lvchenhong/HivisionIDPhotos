@@ -154,6 +154,12 @@ def idphoto_v4_photographic(rgba: np.ndarray, bg_bgr: Tuple[int, int, int]) -> n
 
     alpha = apply_hair_stochastic(alpha)
 
+    # alpha边缘优化：消除锯齿，提升发丝自然度，避免"切边感"
+    alpha_f = alpha.astype(np.float32) / 255.0
+    alpha_f = cv2.GaussianBlur(alpha_f, (3, 3), 0.6)
+    alpha_f = np.clip(alpha_f, 0.0, 1.0)
+    alpha = (alpha_f * 255.0).astype(np.uint8)
+
     bgr = preserve_face_texture(bgr, alpha)
 
     bg = np.zeros(bgr.shape, dtype=np.uint8)

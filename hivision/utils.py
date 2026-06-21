@@ -355,6 +355,10 @@ def add_background(input_image, bgr=(0, 0, 0), mode="pure_color"):
         out = output_bgr.astype(np.float32) * a3 + bg * (1.0 - a3)
         output_bgr = np.clip(out, 0, 255).astype(np.uint8)
 
+    # 6) HD-Commercial Balance Stage（淘宝/拼多多最优成交版本）
+    from hivision.creator.hd_enhance import hd_commercial_balance
+    output_bgr = hd_commercial_balance(output_bgr, face_mask=None, upscale=1.7)
+
     return output_bgr
 
 
