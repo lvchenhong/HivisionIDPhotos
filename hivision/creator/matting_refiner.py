@@ -23,6 +23,10 @@ import numpy as np
 import cv2
 from typing import Tuple
 
+from .hair_stochastic import apply_hair_stochastic
+from .optical import apply_optical_layer
+from .face_texture import preserve_face_texture
+
 
 def _is_strict_mask(alpha: np.ndarray) -> bool:
     """检查 alpha 是否几乎是硬二值 (用于 bypass 软边处理)"""
@@ -129,3 +133,42 @@ def idphoto_v3_natural(rgba: np.ndarray, bg_bgr: Tuple[int, int, int]) -> np.nda
     bg[..., 2] = bg_bgr[2]
 
     return matting_refine(bgr, bg, alpha, edge_damp=0.55)
+
+
+def idphoto_v4_photographic(rgba: np.ndarray, bg_bgr: Tuple[int, int, int]) -> np.ndarray:
+    """
+    V4 摄影级合成: 在 V3 基础上加入以下优化:
+      1. 头发边缘随机性 - 打破AI切割的整齐感
+      2. 背景光学层 - 添加微噪声和暗角渐变
+      3. 人脸纹理保留 - 防止过度平滑
+
+    效果目标:
+      - 头发: 非规则边缘, 有自然毛躁
+      - 人脸: 保留原始纹理, 无重建痕迹
+      - 背景: 非纯色, 有微噪声+光学渐变
+    """
+    assert rgba.ndim == 3 and rgba.shape[2] == 4, "需要 RGBA 4 通道"
+
+    bgr = rgba[..., :3].copy()
+    alpha = rgba[..., 3].copy()
+
+    alpha = apply_hair_stochastic(alpha)
+
+    bgr = preserve_face_texture(bgr, alpha)
+
+    bg = np.zeros(bgr.shape, dtype=np.uint8)
+    bg[..., 0] = bg_bgr[0]
+    bg[..., 1] = bg_bgr[1]
+    bg[..., 2] = bg_bgr[2]
+
+    bg = apply_optical_layer(bg)
+
+    fg = bgr.astype(np.float32)
+    alpha_f = alpha.astype(np.float32) / 255.0
+
+    soft_alpha = cv2.GaussianBlur(alpha_f, (0, 0), 0.8)
+    a3 = soft_alpha[..., None]
+
+    out = fg * a3 + bg.astype(np.float32) * (1.0 - a3)
+
+    return np.clip(out, 0, 255).astype(np.uint8)

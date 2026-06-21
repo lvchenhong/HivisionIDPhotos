@@ -337,10 +337,10 @@ def add_background(input_image, bgr=(0, 0, 0), mode="pure_color"):
         rgba_clean[alpha0_mask, 1] = bgr[1]
         rgba_clean[alpha0_mask, 2] = bgr[2]
 
-    # 3) 走 idphoto_v2_final_stable 工业级稳定输出
-    from hivision.creator.matting_refiner import idphoto_v2_final_stable
+    # 3) 走 idphoto_v4_photographic 摄影级合成
+    from hivision.creator.matting_refiner import idphoto_v4_photographic
     bg_bgr_for_pipeline = (int(bgr[0]), int(bgr[1]), int(bgr[2]))
-    output_bgr = idphoto_v2_final_stable(rgba_clean, bg_bgr=bg_bgr_for_pipeline)
+    output_bgr = idphoto_v4_photographic(rgba_clean, bg_bgr=bg_bgr_for_pipeline)
 
     # 4) 兜底: 合成后再硬覆盖 α=0 区域 (因为 refiner 内部可能因浮点误差回归)
     alpha = rgba_clean[..., 3].astype(np.float32) / 255.0
