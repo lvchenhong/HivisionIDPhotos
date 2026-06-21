@@ -34,7 +34,7 @@ def matting_refine(
     fg: np.ndarray,
     bg: np.ndarray,
     alpha: np.ndarray,
-    edge_damp: float = 0.0,
+    edge_damp: float = 0.18,
 ) -> np.ndarray:
     """
     把 RGBA 干净合成到 bg 上.
@@ -62,32 +62,31 @@ def matting_refine(
     bg = bg.astype(np.float32)
     alpha = np.clip(alpha.astype(np.float32), 0.0, 1.0)
 
-    out = fg.copy()
+    alpha_for_blend = alpha.copy()
+    transition = (alpha_for_blend > 0.006) & (alpha_for_blend < 0.994)
 
-    # 区域 1: 软边 (0.02 < a < 0.5) — 在前景基础上, 把"原图背景色"残留减掉
-    soft = (alpha > 0.02) & (alpha < 0.5)
-    if soft.any():
-        # 检测软边像素: RGB 与背景色的距离
-        # 距离越大, 越可能是"前景未被背景污染" -> 保留
-        # 距离越小, 越可能是"原图背景色泄漏" -> 减去
-        diff_bg = np.abs(fg[soft] - bg[soft]).sum(axis=1)  # (N,)
-        # 越接近 bg, 减得越多 (最大值 = 把 RGB 直接拉成 bg)
-        # 减污强度: 与背景相似度 [0, 1], 1=完全相同
-        sim = 1.0 - np.clip(diff_bg / 255.0, 0, 1)  # 0=完全不同, 1=完全相同
-        sim = sim[..., None]  # (N, 1)
-        # 软边像素: 把"和背景接近的部分"按 alpha 比例替换成背景
-        # 这样头发/肩膀软边的原图背景色不会出现在最终结果中
-        a_s = alpha[soft][..., None]
-        # blend factor: 越软 (a 越小) 越像背景, 越硬 (a 越大) 越像前景
-        out[soft] = fg[soft] * (1.0 - a_s * sim) + bg[soft] * (a_s * sim)
+    if transition.any():
+        band = cv2.dilate(
+            transition.astype(np.uint8), np.ones((3, 3), np.uint8), iterations=1
+        ).astype(bool)
+        smoothed_alpha = cv2.GaussianBlur(alpha_for_blend, (0, 0), 0.55)
+        alpha_for_blend[band] = (
+            alpha_for_blend[band] * 0.75 + smoothed_alpha[band] * 0.25
+        )
+    elif _is_strict_mask(alpha_for_blend):
+        alpha_for_blend = cv2.GaussianBlur(alpha_for_blend, (0, 0), 0.45)
 
-    # 区域 2: 软-半硬过渡 (0.5 < a < 0.98) — 直接用前景 (保护高频)
-    # 不动 out, 保留 fg[soft2] = fg
+    alpha_for_blend[alpha <= 0.006] = 0.0
+    alpha_for_blend[alpha >= 0.994] = 1.0
 
-    # 区域 3: 硬背景 (a < 0.02) — 必须 100% 背景, 否则 IDphotos_cut 的 RGB=255 白边会泄漏
-    hard_bg = alpha <= 0.02
-    if hard_bg.any():
-        out[hard_bg] = bg[hard_bg]
+    if edge_damp > 0 and transition.any():
+        edge_weight = ((1.0 - alpha_for_blend) * transition).astype(np.float32)[..., None]
+        fg = np.clip(fg + (fg - bg) * edge_weight * float(edge_damp), 0, 255)
+
+    a3 = alpha_for_blend[..., None]
+    out = fg * a3 + bg * (1.0 - a3)
+    out[alpha <= 0.006] = bg[alpha <= 0.006]
+    out[alpha >= 0.994] = fg[alpha >= 0.994]
 
     return np.clip(out, 0, 255).astype(np.uint8)
 
@@ -108,7 +107,7 @@ def idphoto_v2_final_stable(rgba: np.ndarray, bg_bgr: Tuple[int, int, int]) -> n
     bg[..., 1] = bg_bgr[1]
     bg[..., 2] = bg_bgr[2]
 
-    return matting_refine(bgr, bg, alpha, edge_damp=0.0)
+    return matting_refine(bgr, bg, alpha, edge_damp=0.18)
 
 
 def idphoto_v3_natural(rgba: np.ndarray, bg_bgr: Tuple[int, int, int]) -> np.ndarray:

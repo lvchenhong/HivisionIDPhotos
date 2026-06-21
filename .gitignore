@@ -19,3 +19,4 @@ hivision/creator/weights/
 logs/
 runs/
 *.log
+test/temp/

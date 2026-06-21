@@ -240,7 +240,8 @@ def get_modnet_matting(input_image, checkpoint_path, ref_size=768):
     matte = HIVISION_MODNET_SESS.run([output_name], {input_name: im})
     matte = (matte[0] * 255).astype("uint8")
     matte = np.squeeze(matte)
-    mask = cv2.resize(matte, (width, length), interpolation=cv2.INTER_NEAREST)
+    mask = cv2.resize(matte, (width, length), interpolation=cv2.INTER_CUBIC)
+    mask = np.clip(mask, 0, 255).astype(np.uint8)
     b, g, r = cv2.split(np.uint8(input_image))
     output_image = cv2.merge((b, g, r, mask))
     if os.getenv("RUN_MODE") != "beast":
@@ -267,7 +268,8 @@ def get_modnet_matting_photographic_portrait_matting(
     )
     matte = (matte[0] * 255).astype("uint8")
     matte = np.squeeze(matte)
-    mask = cv2.resize(matte, (width, length), interpolation=cv2.INTER_NEAREST)
+    mask = cv2.resize(matte, (width, length), interpolation=cv2.INTER_CUBIC)
+    mask = np.clip(mask, 0, 255).astype(np.uint8)
     b, g, r = cv2.split(np.uint8(input_image))
     output_image = cv2.merge((b, g, r, mask))
     if os.getenv("RUN_MODE") != "beast":
@@ -288,6 +290,31 @@ def _soften_alpha_scurve(alpha_f: np.ndarray, lo: float = 0.05, hi: float = 0.95
     (birefnet) 或加专门的 edge-aware composite, 不在 mask 上做.
     """
     return alpha_f
+
+
+def _normalize_alpha(result: np.ndarray) -> np.ndarray:
+    result = result.astype(np.float32)
+    ma = float(np.max(result))
+    mi = float(np.min(result))
+    if ma - mi < 1e-6:
+        return np.zeros_like(result, dtype=np.float32)
+    return (result - mi) / (ma - mi)
+
+
+def _resize_and_refine_alpha(alpha: np.ndarray, size: tuple) -> np.ndarray:
+    """Resize model alpha back to the source size with a light edge-only polish."""
+    mask = cv2.resize(alpha.astype(np.float32), size, interpolation=cv2.INTER_CUBIC)
+    mask = np.clip(mask, 0.0, 1.0)
+
+    soft = ((mask > 0.01) & (mask < 0.99)).astype(np.uint8)
+    if soft.any():
+        band = cv2.dilate(soft, np.ones((3, 3), np.uint8), iterations=1).astype(bool)
+        smoothed = cv2.GaussianBlur(mask, (0, 0), 0.65)
+        mask[band] = mask[band] * 0.7 + smoothed[band] * 0.3
+
+    mask[mask < 0.006] = 0.0
+    mask[mask > 0.994] = 1.0
+    return (np.clip(mask, 0.0, 1.0) * 255).astype(np.uint8)
 
 
 def get_rmbg_matting(input_image: np.ndarray, checkpoint_path, ref_size=1024):
@@ -314,16 +341,10 @@ def get_rmbg_matting(input_image: np.ndarray, checkpoint_path, ref_size=1024):
     im_np = (im_np - 0.5) / 0.5
 
     result = RMBG_SESS.run(None, {RMBG_SESS.get_inputs()[0].name: im_np})[0]
-    result = np.squeeze(result)
-    ma = np.max(result)
-    mi = np.min(result)
-    result = (result - mi) / (ma - mi)
+    result = _normalize_alpha(np.squeeze(result))
     # V3: 对 rmbg 硬 mask 做 S 曲线软化, 增加软边 (1% -> 8-12%)
     result = _soften_alpha_scurve(result, lo=0.05, hi=0.95)
-    im_array = (result * 255).astype(np.uint8)
-    pil_mask = Image.fromarray(im_array, mode="L")
-    pil_mask = pil_mask.resize(orig_image.size, Image.BILINEAR)
-    mask_resized = np.array(pil_mask)
+    mask_resized = _resize_and_refine_alpha(result, orig_image.size)
     orig_rgb = np.array(orig_image.convert("RGB"))
     b, g, r = cv2.split(orig_rgb)
     output_image = cv2.merge((b, g, r, mask_resized))
@@ -363,16 +384,10 @@ def get_rmbg_matting_2(input_image: np.ndarray, checkpoint_path, ref_size=1024):
     im_np = (im_np - 0.5) / 0.5
 
     result = RMBG_2_SESS.run(None, {RMBG_2_SESS.get_inputs()[0].name: im_np})[0]
-    result = np.squeeze(result)
-    ma = np.max(result)
-    mi = np.min(result)
-    result = (result - mi) / (ma - mi)
+    result = _normalize_alpha(np.squeeze(result))
     # V3: S 曲线软化
     result = _soften_alpha_scurve(result, lo=0.05, hi=0.95)
-    im_array = (result * 255).astype(np.uint8)
-    pil_mask = Image.fromarray(im_array, mode="L")
-    pil_mask = pil_mask.resize(orig_image.size, Image.BILINEAR)
-    mask_resized = np.array(pil_mask)
+    mask_resized = _resize_and_refine_alpha(result, orig_image.size)
     orig_rgb = np.array(orig_image.convert("RGB"))
     b, g, r = cv2.split(orig_rgb)
     output_image = cv2.merge((b, g, r, mask_resized))
@@ -406,7 +421,8 @@ def get_mnn_modnet_matting(input_image, checkpoint_path, ref_size=512):
     matte = matte.read()
     matte = (matte * 255).astype("uint8")
     matte = np.squeeze(matte)
-    mask = cv2.resize(matte, (width, length), interpolation=cv2.INTER_NEAREST)
+    mask = cv2.resize(matte, (width, length), interpolation=cv2.INTER_CUBIC)
+    mask = np.clip(mask, 0, 255).astype(np.uint8)
     b, g, r = cv2.split(np.uint8(input_image))
     output_image = cv2.merge((b, g, r, mask))
     return output_image
@@ -447,7 +463,7 @@ def get_birefnet_portrait_matting(input_image, checkpoint_path, ref_size=512):
     pil_im = Image.fromarray(
         im_array, mode="L"
     )
-    pil_im = pil_im.resize(orig_image.size, Image.NEAREST)
+    pil_im = pil_im.resize(orig_image.size, Image.BICUBIC)
     new_im = Image.new("RGBA", orig_image.size, (0, 0, 0, 0))
     new_im.paste(orig_image, mask=pil_im)
     

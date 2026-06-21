@@ -25,6 +25,7 @@ MATTING_MODEL = [
     "modnet_photographic_portrait_matting",
     "mnn_hivision_modnet",
     "rmbg-1.4",
+    "rmbg-2.0",
     "birefnet-v1-lite",
 ]
 FACE_DETECT_MODEL = [
@@ -74,7 +75,7 @@ parser.add_argument(
 parser.add_argument(
     "--matting_model",
     help="抠图模型权重",
-    default="modnet_photographic_portrait_matting",
+    default="rmbg-2.0",
     choices=MATTING_MODEL,
 )
 parser.add_argument(

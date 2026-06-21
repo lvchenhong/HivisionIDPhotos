@@ -17,6 +17,7 @@ from hivision.plugin.beauty.handler import beauty_face
 from .photo_adjuster import adjust_photo
 import cv2
 import time
+import os
 
 
 class IDCreator:
@@ -179,6 +180,25 @@ class IDCreator:
             self.after_detect and self.after_detect(ctx)
             end_alignment_time = time.time()
             print(f"[3.1]  Face Alignment Time: {end_alignment_time - start_alignment_time:.3f}s")
+
+        if (
+            not ctx.params.crop_only
+            and ctx.matting_image is not None
+            and ctx.face.get("rectangle") is not None
+            and os.getenv("HIVISION_DISABLE_EDGE_REFINE") != "1"
+        ):
+            print("[3.2]  Start Edge Refinement...")
+            start_edge_refine_time = time.time()
+            from hivision.creator.multi_scale_matting import refine_edge_alpha
+
+            ctx.matting_image = refine_edge_alpha(
+                ctx.matting_image, ctx.face["rectangle"]
+            )
+            ctx.processing_image = ctx.matting_image.copy()
+            end_edge_refine_time = time.time()
+            print(
+                f"[3.2]  Edge Refinement Time: {end_edge_refine_time - start_edge_refine_time:.3f}s"
+            )
 
         # 4. ------------------图像调整------------------
         print("[4]  Start Image Post-Adjustment...")
