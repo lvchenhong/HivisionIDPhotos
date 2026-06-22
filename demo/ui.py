@@ -284,7 +284,7 @@ def create_ui(
                     watermark_text_size = gr.Slider(
                         minimum=10,
                         maximum=100,
-                        value=20,
+                        value=35,
                         label=LOCALES["watermark_size"][DEFAULT_LANG]["label"],
                         interactive=False,
                         step=1,
@@ -293,7 +293,7 @@ def create_ui(
                     watermark_text_opacity = gr.Slider(
                         minimum=0,
                         maximum=1,
-                        value=0.15,
+                        value=0.08,
                         label=LOCALES["watermark_opacity"][DEFAULT_LANG]["label"],
                         interactive=False,
                         step=0.01,
@@ -311,7 +311,7 @@ def create_ui(
                     watermark_text_space = gr.Slider(
                         minimum=10,
                         maximum=200,
-                        value=25,
+                        value=90,
                         label=LOCALES["watermark_space"][DEFAULT_LANG]["label"],
                         interactive=False,
                         step=1,
