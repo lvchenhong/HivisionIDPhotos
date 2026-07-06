@@ -590,13 +590,25 @@ def create_ui(
 
             def change_size_mode(size_option_item, lang):
                 choices = LOCALES["size_mode"][lang]["choices"]
+                # 如果选择只裁切尺寸: 显示尺寸列表, 隐藏背景颜色/渲染模式(不换底)
+                if size_option_item == choices[4]:
+                    return {
+                        custom_size_px: gr.update(visible=False),
+                        custom_size_mm: gr.update(visible=False),
+                        size_list_row: gr.update(visible=True),
+                        plugin_options: gr.update(interactive=True),
+                        color_options: gr.update(visible=False),
+                        render_options: gr.update(visible=False),
+                    }
                 # 如果选择自定义尺寸mm
-                if size_option_item == choices[3]:
+                elif size_option_item == choices[3]:
                     return {
                         custom_size_px: gr.update(visible=False),
                         custom_size_mm: gr.update(visible=True),
                         size_list_row: gr.update(visible=False),
                         plugin_options: gr.update(interactive=True),
+                        color_options: gr.update(visible=True),
+                        render_options: gr.update(visible=True),
                     }
                 # 如果选择自定义尺寸px
                 elif size_option_item == choices[2]:
@@ -605,6 +617,8 @@ def create_ui(
                         custom_size_mm: gr.update(visible=False),
                         size_list_row: gr.update(visible=False),
                         plugin_options: gr.update(interactive=True),
+                        color_options: gr.update(visible=True),
+                        render_options: gr.update(visible=True),
                     }
                 # 如果选择只换底，则隐藏所有尺寸组件
                 elif size_option_item == choices[1]:
@@ -613,6 +627,8 @@ def create_ui(
                         custom_size_mm: gr.update(visible=False),
                         size_list_row: gr.update(visible=False),
                         plugin_options: gr.update(interactive=False),
+                        color_options: gr.update(visible=True),
+                        render_options: gr.update(visible=True),
                     }
                 # 如果选择预设尺寸，则隐藏自定义尺寸组件
                 else:
@@ -621,6 +637,8 @@ def create_ui(
                         custom_size_mm: gr.update(visible=False),
                         size_list_row: gr.update(visible=True),
                         plugin_options: gr.update(interactive=True),
+                        color_options: gr.update(visible=True),
+                        render_options: gr.update(visible=True),
                     }
 
             def change_image_kb(image_kb_option, lang):
@@ -697,6 +715,8 @@ def create_ui(
                     custom_size_mm,
                     size_list_row,
                     plugin_options,
+                    color_options,
+                    render_options,
                 ],
             )
 

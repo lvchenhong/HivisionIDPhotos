@@ -130,7 +130,16 @@ class IDCreator:
             self.after_matting and self.after_matting(ctx)
         # 如果进行抠图
         else:
-            ctx.matting_image = ctx.processing_image
+            # crop_only: 保留原图背景, 补全不透明 alpha 通道供 adjust_photo 的 4 通道流程使用
+            # (IDphotos_cut / get_box 均要求 4 通道, 3 通道原图会直接 ValueError)
+            src = ctx.processing_image
+            if src.shape[2] == 3:
+                alpha = np.full(
+                    (src.shape[0], src.shape[1]), 255, dtype=np.uint8
+                )
+                ctx.matting_image = cv2.merge((src, alpha))
+            else:
+                ctx.matting_image = src
 
 
         # 2. ------------------美颜------------------

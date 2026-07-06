@@ -12,6 +12,7 @@ from hivision.creator.layout_calculator import (
     generate_layout_array,
     generate_layout_image,
 )
+from hivision.creator.photo_adjuster import _composite_to_white
 from hivision.creator.choose_handler import choose_handler
 from hivision.plugin.template.template_calculator import generte_template_photo
 from demo.utils import range_check
@@ -206,8 +207,11 @@ class IDPhotoProcessor:
         custom_size_width_mm,
     ):
         """处理尺寸模式"""
-        # 如果选择了尺寸列表
-        if idphoto_json["size_mode"] == LOCALES["size_mode"][language]["choices"][0]:
+        # 如果选择了尺寸列表 或 只裁切尺寸(复用尺寸列表)
+        if (
+            idphoto_json["size_mode"] == LOCALES["size_mode"][language]["choices"][0]
+            or idphoto_json["size_mode"] == LOCALES["size_mode"][language]["choices"][4]
+        ):
             idphoto_json["size"] = LOCALES["size_list"][language]["develop"][
                 size_list_option
             ]
@@ -304,9 +308,13 @@ class IDPhotoProcessor:
         change_bg_only = (
             idphoto_json["size_mode"] in LOCALES["size_mode"][language]["choices"][1]
         )
+        crop_only = (
+            idphoto_json["size_mode"] == LOCALES["size_mode"][language]["choices"][4]
+        )
         return creator(
             input_image,
             change_bg_only=change_bg_only,
+            crop_only=crop_only,
             size=idphoto_json["size"],
             head_measure_ratio=head_measure_ratio,
             head_top_range=(top_distance_max, top_distance_min),
@@ -410,6 +418,12 @@ class IDPhotoProcessor:
         """渲染背景"""
         render_modes = {0: "pure_color", 1: "updown_gradient", 2: "center_gradient"}
         render_mode = render_modes[idphoto_json["render_mode"]]
+
+        # 只裁切尺寸: 不换底, 保留原图背景, 仅把裁剪框超出区的透明像素合成白底
+        if idphoto_json["size_mode"] == LOCALES["size_mode"][language]["choices"][4]:
+            result_image_standard = np.uint8(_composite_to_white(result_image_standard))
+            result_image_hd = np.uint8(_composite_to_white(result_image_hd))
+            return result_image_standard, result_image_hd
 
         if idphoto_json["color_mode"] != LOCALES["bg_color"][language]["choices"][-3]:
             result_image_standard = np.uint8(
