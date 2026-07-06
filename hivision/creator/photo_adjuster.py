@@ -45,6 +45,53 @@ def adjust_photo(ctx: Context):
     y2 = y1 + crop_size[0]
     x2 = x1 + crop_size[1]
 
+    # Step2.5: 横向图片修复 — 裁剪框高度不超过图像高度
+    # 横向图片 (width > height) 时 crop_size[0] 可能超过 height,
+    # 导致 IDphotos_cut 在底部填充透明像素, move() 把透明移到顶部, 人像下移过多。
+    # 修复: 等比缩小裁剪框, 保持宽高比, 让裁剪框不超出图像底部。
+    if crop_size[0] > height:
+        scale = height / crop_size[0]
+        crop_size = (height, int(crop_size[1] * scale))
+        resize_ratio_single = resize_ratio_single * scale
+        x1 = int(face_center[0] - crop_size[1] / 2)
+        y1 = int(face_center[1] - crop_size[0] * params.head_height_ratio)
+        y2 = y1 + crop_size[0]
+        x2 = x1 + crop_size[1]
+
+    # Step2.6: crop_only 模式 — 用 face_rect 估计头顶, 强制头顶距顶部 = head_top_range[0]
+    # crop_only 模式下 alpha 全 255, get_box 检测裁剪框边界而非人像边界,
+    # detect_distance 逻辑失效. 改用 face_rect 直接定位头顶, 与正常抠图模式效果一致.
+    # 同时做四向边界保护 (y1>=0, y2<=height, x1>=0, x2<=width),
+    # 避免 IDphotos_cut 产生透明区被 _composite_to_white 合成白边 (生图模式用 add_background 填背景色无此问题).
+    if params.crop_only:
+        if crop_size[0] < height:
+            # 有调整空间: 用 head_top_range[0] 定位头顶
+            head_top_estimate = y - 0.5 * h  # 人脸框顶部上方 0.5 倍人脸高度, 近似头顶
+            y1 = int(head_top_estimate - crop_size[0] * params.head_top_range[0])
+            if y1 < 0:
+                y1 = 0
+            y2 = y1 + crop_size[0]
+            if y2 > height:
+                y2 = height
+                y1 = y2 - crop_size[0]
+        else:
+            # 无调整空间 (横向图片 crop_size[0]=height): 仅保证不超出原图边界
+            if y1 < 0:
+                y1 = 0
+            y2 = y1 + crop_size[0]
+            if y2 > height:
+                y2 = height
+                y1 = y2 - crop_size[0]
+        # x 方向边界保护 (避免左右白边)
+        x1 = int(face_center[0] - crop_size[1] / 2)
+        x2 = x1 + crop_size[1]
+        if x1 < 0:
+            x1 = 0
+            x2 = x1 + crop_size[1]
+        if x2 > width:
+            x2 = width
+            x1 = x2 - crop_size[1]
+
     # Step3, 裁剪框的调整
     cut_image = IDphotos_cut(x1, y1, x2, y2, ctx.matting_image)
     # V3.3 关键修复: 降采样用 INTER_AREA (保高频), 不要用默认 INTER_LINEAR
@@ -78,6 +125,12 @@ def adjust_photo(ctx: Context):
         min=params.head_top_range[1],
     )
 
+    # crop_only 模式: 已在 Step2.6 用 face_rect 定位头顶, 跳过 detect_distance 的下移
+    # (crop_only 下 alpha 全 255, detect_distance 检测的是裁剪框边界而非人像边界, 下移无意义)
+    if params.crop_only:
+        status_top = 0
+        move_value = 0
+
     # Step6. 对照片的第二轮裁剪
     if status_left_right == 0 and status_top == 0:
         result_image = cut_image
@@ -95,7 +148,12 @@ def adjust_photo(ctx: Context):
     relative_y = y - (y1 + cut_value_top + status_top * move_value)
 
     # Step7. 当照片底部存在空隙时，下拉至底部
-    result_image, y_high = move(result_image.astype(np.uint8))
+    # crop_only 模式: alpha 全 255, get_box 边界效应返回 y_high=1 (y_down=height-1 而非 height),
+    # move() 会下移人像 1px 并在顶部填 1px 透明条, 被 _composite_to_white 合成白边. 跳过.
+    if params.crop_only:
+        y_high = 0
+    else:
+        result_image, y_high = move(result_image.astype(np.uint8))
     relative_y = relative_y + y_high  # 更新换装参数
 
     # 修复: 保持 RGBA 输出, 不要合成白底. 让下游 add_background 走 refiner pipeline
@@ -119,11 +177,21 @@ def adjust_photo(ctx: Context):
     adj_y1 = y1 + cut_value_top + status_top * move_value
     adj_x2 = x2 - x_right
     adj_y2 = y2 - cut_value_top + status_top * move_value
+
+    # 横向图片修复: 限制裁剪框不超出图像底部
+    # Step6 的下移可能导致 adj_y2 > height, 需要上移裁剪框使底部不超出
+    if adj_y2 > height:
+        overflow = adj_y2 - height
+        adj_y1 = adj_y1 - overflow
+        adj_y2 = height
+
     result_image_standard = _resize_at_original_resolution_v2(
-        ctx, adj_x1, adj_y1, adj_x2, adj_y2, standard_size
+        ctx, adj_x1, adj_y1, adj_x2, adj_y2, standard_size,
+        skip_move=params.crop_only,
     )
     result_image_hd, resize_ratio_max = _resize_hd_at_original_resolution_v2(
-        ctx, adj_x1, adj_y1, adj_x2, adj_y2, max(600, standard_size[1])
+        ctx, adj_x1, adj_y1, adj_x2, adj_y2, max(600, standard_size[1]),
+        skip_move=params.crop_only,
     )
 
     # Step9. 参数准备 - 为换装服务
@@ -219,15 +287,20 @@ def _resize_at_original_resolution_v2(
     ctx: Context,
     x1: int, y1: int, x2: int, y2: int,
     target_size: tuple,
+    skip_move: bool = False,
 ) -> np.ndarray:
     """
     V3.3.3: 完整重现 adjust_photo Step7-8:
       1. 从抠图原图 (1927x1280) 裁出 adjusted region
       2. 跑 move() (下拉人像) -> result_image
       3. 直接 INTER_AREA 一次降到 target_size
+    skip_move=True 时跳过 move() (crop_only 模式: 避免 get_box 边界效应产生 1px 白边)
     """
     cut_image = IDphotos_cut(x1, y1, x2, y2, ctx.matting_image)
-    result_image, _ = move(cut_image.astype(np.uint8))
+    if skip_move:
+        result_image = cut_image
+    else:
+        result_image, _ = move(cut_image.astype(np.uint8))
     return cv2.resize(result_image, (target_size[1], target_size[0]), interpolation=cv2.INTER_AREA)
 
 
@@ -235,12 +308,17 @@ def _resize_hd_at_original_resolution_v2(
     ctx: Context,
     x1: int, y1: int, x2: int, y2: int,
     min_esp: int,
+    skip_move: bool = False,
 ) -> tuple:
     """
     V3.3.3: 同 _resize_at_original_resolution_v2 但保持 hd 尺寸
+    skip_move=True 时跳过 move() (crop_only 模式: 避免 get_box 边界效应产生 1px 白边)
     """
     cut_image = IDphotos_cut(x1, y1, x2, y2, ctx.matting_image)
-    result_image, _ = move(cut_image.astype(np.uint8))
+    if skip_move:
+        result_image = cut_image
+    else:
+        result_image, _ = move(cut_image.astype(np.uint8))
     h, w = result_image.shape[:2]
     min_border = min(h, w)
     if min_border < min_esp:

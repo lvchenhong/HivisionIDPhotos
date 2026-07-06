@@ -297,7 +297,7 @@ def generate_gradient(start_color, width, height, mode="updown"):
     return r_out, g_out, b_out
 
 
-def add_background(input_image, bgr=(0, 0, 0), mode="pure_color"):
+def add_background(input_image, bgr=(0, 0, 0), mode="pure_color", enhance=True):
     """
     本函数的功能为为透明图像加上背景 (走商业级 pipeline).
     规格:
@@ -309,6 +309,9 @@ def add_background(input_image, bgr=(0, 0, 0), mode="pure_color"):
       - 纯色背景, no blur fusion
       - light correction only: brightness +0.02, contrast +0.07, sharpen 0.6
       - 禁美颜, 禁 AI 增强
+    Args:
+        enhance: 是否走 HD-Commercial Balance (1.7x 放大+调色).
+                 标准照传 False 保持一寸尺寸, 高清照传 True.
     """
     if input_image.ndim != 3 or input_image.shape[2] != 4:
         raise ValueError("The input image must have 4 channels.")
@@ -356,8 +359,10 @@ def add_background(input_image, bgr=(0, 0, 0), mode="pure_color"):
         output_bgr = np.clip(out, 0, 255).astype(np.uint8)
 
     # 6) HD-Commercial Balance Stage（淘宝/拼多多最优成交版本）
-    from hivision.creator.hd_enhance import hd_commercial_balance
-    output_bgr = hd_commercial_balance(output_bgr, face_mask=None, upscale=1.7)
+    # 标准照不增强 (保持一寸尺寸), 高清照增强 (1.7x 放大+调色)
+    if enhance:
+        from hivision.creator.hd_enhance import hd_commercial_balance
+        output_bgr = hd_commercial_balance(output_bgr, face_mask=None, upscale=1.7)
 
     return output_bgr
 

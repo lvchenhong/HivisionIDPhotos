@@ -53,7 +53,7 @@ class IDPhotoProcessor:
         watermark_text_angle,
         watermark_text_space,
         face_detect_option,
-        head_measure_ratio=0.28,
+        head_measure_ratio=0.16,
         top_distance_max=0.08,
         whitening_strength=0,
         image_dpi_option=False,
@@ -428,12 +428,14 @@ class IDPhotoProcessor:
         if idphoto_json["color_mode"] != LOCALES["bg_color"][language]["choices"][-3]:
             result_image_standard = np.uint8(
                 add_background(
-                    result_image_standard, bgr=idphoto_json["color_bgr"], mode=render_mode
+                    result_image_standard, bgr=idphoto_json["color_bgr"], mode=render_mode,
+                    enhance=False  # 标准照不增强, 保持一寸尺寸
                 )
             )
             result_image_hd = np.uint8(
                 add_background(
-                    result_image_hd, bgr=idphoto_json["color_bgr"], mode=render_mode
+                    result_image_hd, bgr=idphoto_json["color_bgr"], mode=render_mode,
+                    enhance=True  # 高清照增强 (1.7x 放大+调色)
                 )
             )
         # 如果选择了美式证件照

@@ -17,7 +17,7 @@ class Params:
         size: Tuple[int, int] = (413, 295),
         change_bg_only: bool = False,
         crop_only: bool = False,
-        head_measure_ratio: float = 0.28,
+        head_measure_ratio: float = 0.16,
         head_height_ratio: float = 0.45,
         head_top_range: float = (0.08, 0.06),
         face: Tuple[int, int, int, int] = None,

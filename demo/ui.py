@@ -158,7 +158,7 @@ def create_ui(
                     head_measure_ratio_option = gr.Slider(
                         minimum=0.1,
                         maximum=0.5,
-                        value=0.26,
+                        value=0.16,
                         step=0.01,
                         label=LOCALES["head_measure_ratio"][DEFAULT_LANG]["label"],
                         interactive=True,
