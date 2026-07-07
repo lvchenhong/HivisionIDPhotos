@@ -600,6 +600,16 @@ def create_ui(
                         color_options: gr.update(visible=False),
                         render_options: gr.update(visible=False),
                     }
+                # 如果选择只裁切(自定义px): 显示自定义px输入框, 隐藏尺寸列表/背景颜色/渲染模式(不换底)
+                elif size_option_item == choices[5]:
+                    return {
+                        custom_size_px: gr.update(visible=True),
+                        custom_size_mm: gr.update(visible=False),
+                        size_list_row: gr.update(visible=False),
+                        plugin_options: gr.update(interactive=True),
+                        color_options: gr.update(visible=False),
+                        render_options: gr.update(visible=False),
+                    }
                 # 如果选择自定义尺寸mm
                 elif size_option_item == choices[3]:
                     return {

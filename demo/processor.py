@@ -215,15 +215,18 @@ class IDPhotoProcessor:
             idphoto_json["size"] = LOCALES["size_list"][language]["develop"][
                 size_list_option
             ]
-        # 如果选择了自定义尺寸(px或mm)
+        # 如果选择了自定义尺寸(px或mm) 或 只裁切(自定义px)
         elif (
             idphoto_json["size_mode"] == LOCALES["size_mode"][language]["choices"][2]
             or idphoto_json["size_mode"] == LOCALES["size_mode"][language]["choices"][3]
+            or idphoto_json["size_mode"] == LOCALES["size_mode"][language]["choices"][5]
         ):
-            # 如果选择了自定义尺寸(px)
+            # 如果选择了自定义尺寸(px) 或 只裁切(自定义px)
             if (
                 idphoto_json["size_mode"]
                 == LOCALES["size_mode"][language]["choices"][2]
+                or idphoto_json["size_mode"]
+                == LOCALES["size_mode"][language]["choices"][5]
             ):
                 id_height, id_width = int(custom_size_height), int(custom_size_width)
             # 如果选择了自定义尺寸(mm)
@@ -310,6 +313,7 @@ class IDPhotoProcessor:
         )
         crop_only = (
             idphoto_json["size_mode"] == LOCALES["size_mode"][language]["choices"][4]
+            or idphoto_json["size_mode"] == LOCALES["size_mode"][language]["choices"][5]
         )
         return creator(
             input_image,
@@ -419,8 +423,11 @@ class IDPhotoProcessor:
         render_modes = {0: "pure_color", 1: "updown_gradient", 2: "center_gradient"}
         render_mode = render_modes[idphoto_json["render_mode"]]
 
-        # 只裁切尺寸: 不换底, 保留原图背景, 仅把裁剪框超出区的透明像素合成白底
-        if idphoto_json["size_mode"] == LOCALES["size_mode"][language]["choices"][4]:
+        # 只裁切尺寸/只裁切(自定义px): 不换底, 保留原图背景, 仅把裁剪框超出区的透明像素合成白底
+        if (
+            idphoto_json["size_mode"] == LOCALES["size_mode"][language]["choices"][4]
+            or idphoto_json["size_mode"] == LOCALES["size_mode"][language]["choices"][5]
+        ):
             result_image_standard = np.uint8(_composite_to_white(result_image_standard))
             result_image_hd = np.uint8(_composite_to_white(result_image_hd))
             return result_image_standard, result_image_hd
